@@ -175,6 +175,7 @@ fn test_load_save_index() {
     let mut index_data = IndexData {
         version: 2,
         config_hash: manager.config_hash().to_string(),
+        session_id: None,
         entries: std::collections::HashMap::new(),
     };
     index_data.entries.insert(
@@ -323,6 +324,7 @@ fn test_index_data_serialization() {
     let index = IndexData {
         version: 2,
         config_hash: "test_hash_123".to_string(),
+        session_id: None,
         entries,
     };
 
@@ -374,6 +376,7 @@ fn test_index_data_get_all_blob_hashes() {
     let index = IndexData {
         version: 2,
         config_hash: "hash".to_string(),
+        session_id: None,
         entries,
     };
 
@@ -474,6 +477,7 @@ fn test_load_index_with_wrong_config_hash_returns_empty() {
     let mut index_data = IndexData {
         version: 2,
         config_hash: "different_hash".to_string(),
+        session_id: None,
         entries: HashMap::new(),
     };
     index_data.entries.insert(
@@ -501,6 +505,7 @@ fn test_load_index_with_wrong_version_returns_empty() {
     let index_data = IndexData {
         version: 1, // Old version
         config_hash: manager.config_hash().to_string(),
+        session_id: None,
         entries: HashMap::new(),
     };
     manager.save_index(&index_data).unwrap();
@@ -548,6 +553,7 @@ fn test_save_index_creates_file() {
     let index_data = IndexData {
         version: 2,
         config_hash: manager.config_hash().to_string(),
+        session_id: None,
         entries: HashMap::new(),
     };
 
@@ -566,6 +572,7 @@ fn test_save_index_overwrites_existing() {
     let mut index1 = IndexData {
         version: 2,
         config_hash: manager.config_hash().to_string(),
+        session_id: None,
         entries: HashMap::new(),
     };
     index1.entries.insert(
@@ -583,6 +590,7 @@ fn test_save_index_overwrites_existing() {
     let mut index2 = IndexData {
         version: 2,
         config_hash: manager.config_hash().to_string(),
+        session_id: None,
         entries: HashMap::new(),
     };
     index2.entries.insert(
@@ -611,6 +619,7 @@ fn test_save_index_no_temp_file_left() {
     let index_data = IndexData {
         version: 2,
         config_hash: manager.config_hash().to_string(),
+        session_id: None,
         entries: HashMap::new(),
     };
     manager.save_index(&index_data).unwrap();
@@ -693,6 +702,7 @@ fn test_index_with_multiple_files() {
     let index_data = IndexData {
         version: 2,
         config_hash: manager.config_hash().to_string(),
+        session_id: None,
         entries,
     };
     manager.save_index(&index_data).unwrap();
@@ -732,6 +742,7 @@ fn test_index_with_chunked_file() {
     let index_data = IndexData {
         version: 2,
         config_hash: manager.config_hash().to_string(),
+        session_id: None,
         entries,
     };
     manager.save_index(&index_data).unwrap();
@@ -782,6 +793,7 @@ fn test_index_with_unicode_filenames() {
     let index_data = IndexData {
         version: 2,
         config_hash: manager.config_hash().to_string(),
+        session_id: None,
         entries,
     };
     manager.save_index(&index_data).unwrap();
@@ -821,6 +833,7 @@ fn test_index_with_special_path_characters() {
     let index_data = IndexData {
         version: 2,
         config_hash: manager.config_hash().to_string(),
+        session_id: None,
         entries,
     };
     manager.save_index(&index_data).unwrap();
@@ -848,6 +861,7 @@ fn test_index_empty_blob_hashes() {
     let index_data = IndexData {
         version: 2,
         config_hash: manager.config_hash().to_string(),
+        session_id: None,
         entries,
     };
     manager.save_index(&index_data).unwrap();

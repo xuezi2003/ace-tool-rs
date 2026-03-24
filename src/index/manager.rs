@@ -65,6 +65,8 @@ pub struct IndexData {
     pub version: u32,
     /// Configuration fingerprint for detecting chunking config changes
     pub config_hash: String,
+    /// Session id that last uploaded these blobs to the remote service
+    pub session_id: Option<String>,
     /// File entries, key is normalized relative path (forward slashes)
     pub entries: HashMap<String, FileEntry>,
 }
@@ -1050,6 +1052,10 @@ impl IndexManager {
 
     /// Index the project with mtime caching and parallel processing
     pub async fn index_project(&self) -> IndexResult {
+        self.index_project_internal(false).await
+    }
+
+    async fn index_project_internal(&self, force_reupload: bool) -> IndexResult {
         info!("Starting project indexing: {:?}", self.project_root);
 
         // Step 1: Collect file paths (via spawn_blocking to avoid blocking async runtime)
@@ -1085,7 +1091,23 @@ impl IndexManager {
         info!("Found {} files to process", file_paths.len());
 
         // Step 2: Load old index
-        let old_index = self.load_index();
+        let old_index = if force_reupload {
+            info!("Forcing full blob re-upload, ignoring local index cache");
+            IndexData::default()
+        } else {
+            let cached_index = self.load_index();
+            match cached_index.session_id.as_deref() {
+                Some(session_id) if session_id != get_session_id() => {
+                    info!(
+                        "Cached session id {} does not match current session {}, rebuilding uploads",
+                        session_id,
+                        get_session_id()
+                    );
+                    IndexData::default()
+                }
+                _ => cached_index,
+            }
+        };
 
         // Step 3: Process files in parallel using rayon (via spawn_blocking)
         let old_index_arc = Arc::new(old_index);
@@ -1131,6 +1153,7 @@ impl IndexManager {
         let mut new_index = IndexData {
             version: CURRENT_INDEX_VERSION,
             config_hash: self.config_hash.clone(),
+            session_id: Some(get_session_id().to_string()),
             entries: HashMap::with_capacity(results.len()),
         };
 
@@ -1243,30 +1266,11 @@ impl IndexManager {
         }
     }
 
-    /// Search code context
-    pub async fn search_context(&self, query: &str) -> Result<String> {
-        info!("Starting search: {}", query);
-
-        // Auto-index first
-        let index_result = self.index_project().await;
-        if index_result.status == "error" {
-            return Err(anyhow!("Failed to index project: {}", index_result.message));
-        }
-        if index_result.status == "partial" {
-            warn!(
-                "Indexing completed with some failures: {}",
-                index_result.message
-            );
-        }
-
-        // Load index
-        let index_data = self.load_index();
-        let blob_names = index_data.get_all_blob_hashes();
+    async fn execute_search_request(&self, query: &str, blob_names: Vec<String>) -> Result<String> {
         if blob_names.is_empty() {
             return Err(anyhow!("No blobs found after indexing"));
         }
 
-        // Execute search
         info!("Searching {} chunks...", blob_names.len());
 
         let url = format!("{}/agents/codebase-retrieval", self.base_url);
@@ -1286,7 +1290,6 @@ impl IndexManager {
         let request_id = generate_request_id();
         let start_time = Instant::now();
 
-        // Lazy serialization: only serialize body if logging is enabled
         let http_request_log = if http_logger::is_enabled() {
             let request_body = serde_json::to_string(&request).ok();
             Some(HttpRequestLog {
@@ -1389,6 +1392,53 @@ impl IndexManager {
                     );
                 }
                 Err(anyhow!("Search request failed: {}", error_msg))
+            }
+        }
+    }
+
+    /// Search code context
+    pub async fn search_context(&self, query: &str) -> Result<String> {
+        info!("Starting search: {}", query);
+
+        let index_result = self.index_project().await;
+        if index_result.status == "error" {
+            return Err(anyhow!("Failed to index project: {}", index_result.message));
+        }
+        if index_result.status == "partial" {
+            warn!(
+                "Indexing completed with some failures: {}",
+                index_result.message
+            );
+        }
+
+        let blob_names = self.load_index().get_all_blob_hashes();
+        match self.execute_search_request(query, blob_names).await {
+            Ok(result) => Ok(result),
+            Err(first_error) => {
+                warn!(
+                    "Search failed, forcing full blob re-upload and retrying once: {}",
+                    first_error
+                );
+
+                let retry_index_result = self.index_project_internal(true).await;
+                if retry_index_result.status == "error" {
+                    return Err(anyhow!(
+                        "Search failed, and forced re-upload also failed: {}; reindex error: {}",
+                        first_error,
+                        retry_index_result.message
+                    ));
+                }
+
+                let retry_blob_names = self.load_index().get_all_blob_hashes();
+                self.execute_search_request(query, retry_blob_names)
+                    .await
+                    .map_err(|retry_error| {
+                        anyhow!(
+                            "Search failed after retry. initial error: {}; retry error: {}",
+                            first_error,
+                            retry_error
+                        )
+                    })
             }
         }
     }
