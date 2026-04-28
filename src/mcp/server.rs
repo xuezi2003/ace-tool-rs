@@ -9,9 +9,8 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info};
 
 use crate::config::Config;
-use crate::tools::enhance_prompt::{EnhancePromptArgs, EnhancePromptToolDef, ENHANCE_PROMPT_TOOL};
 use crate::tools::search_context::{SearchContextArgs, SearchContextToolDef, SEARCH_CONTEXT_TOOL};
-use crate::tools::{EnhancePromptTool, SearchContextTool};
+use crate::tools::SearchContextTool;
 
 /// Map tool name aliases to canonical names
 fn normalize_tool_name(name: &str) -> &str {
@@ -22,21 +21,6 @@ fn normalize_tool_name(name: &str) -> &str {
 }
 
 use super::types::*;
-
-/// Check if the enhance_prompt tool is enabled.
-/// The tool is disabled when PROMPT_ENHANCER env var is set to "disabled", "false", "0", or "off".
-/// By default (env var not set or set to other values), the tool is enabled.
-fn is_enhance_prompt_enabled() -> bool {
-    std::env::var("PROMPT_ENHANCER")
-        .map(|v| {
-            let v = v.trim();
-            !v.eq_ignore_ascii_case("disabled")
-                && !v.eq_ignore_ascii_case("false")
-                && !v.eq_ignore_ascii_case("off")
-                && v != "0"
-        })
-        .unwrap_or(true)
-}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TransportMode {
@@ -365,20 +349,11 @@ impl McpServer {
 
     /// Handle list tools request
     fn handle_list_tools(&self, id: Option<Value>) -> JsonRpcResponse {
-        let mut tools = vec![Tool {
+        let tools = vec![Tool {
             name: SEARCH_CONTEXT_TOOL.name.to_string(),
             description: SEARCH_CONTEXT_TOOL.description.to_string(),
             input_schema: SearchContextToolDef::get_input_schema(),
         }];
-
-        // Only expose enhance_prompt tool if not disabled
-        if is_enhance_prompt_enabled() {
-            tools.push(Tool {
-                name: ENHANCE_PROMPT_TOOL.name.to_string(),
-                description: ENHANCE_PROMPT_TOOL.description.to_string(),
-                input_schema: EnhancePromptToolDef::get_input_schema(),
-            });
-        }
 
         let result = ListToolsResult { tools };
 
@@ -423,42 +398,6 @@ impl McpServer {
                 };
 
                 let tool = SearchContextTool::new(self.config.clone());
-                let result = tool.execute(args).await;
-
-                let call_result = CallToolResult {
-                    content: vec![TextContent::new(result.text)],
-                };
-
-                match serde_json::to_value(call_result) {
-                    Ok(value) => JsonRpcResponse::success(id, value),
-                    Err(e) => JsonRpcResponse::error(id, -32603, format!("Internal error: {}", e)),
-                }
-            }
-            "enhance_prompt" => {
-                // Check if the tool is enabled before executing
-                if !is_enhance_prompt_enabled() {
-                    return JsonRpcResponse::error(
-                        id,
-                        -32602,
-                        "Tool 'enhance_prompt' is disabled".to_string(),
-                    );
-                }
-
-                let args: EnhancePromptArgs = match call_params.arguments {
-                    Some(args) => match serde_json::from_value(args) {
-                        Ok(a) => a,
-                        Err(e) => {
-                            return JsonRpcResponse::error(
-                                id,
-                                -32602,
-                                format!("Invalid arguments: {}", e),
-                            );
-                        }
-                    },
-                    None => EnhancePromptArgs::default(),
-                };
-
-                let tool = EnhancePromptTool::new(self.config.clone());
                 let result = tool.execute(args).await;
 
                 let call_result = CallToolResult {
